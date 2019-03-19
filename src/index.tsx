@@ -1,8 +1,10 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom";
-import * as firebase from "firebase/app"
+// import * as firebase from "firebase/app"
+import { Card } from 'semantic-ui-react'
+// import 'semantic-ui-css/semantic.min.css'
 
-// import * as S from "./stores"
+import * as V from "./viz"
 // import * as A from "./app"
 // import * as UI from "./ui"
 
@@ -14,5 +16,11 @@ import * as firebase from "firebase/app"
 
 // const appStore = new S.AppStore()
 ReactDOM.render(
-  <div>Hello world!</div>,
+  <Card>
+    <V.AudioViz />
+    <Card.Content>
+      <Card.Header>Things!</Card.Header>
+      <Card.Description>Herein we will put some things.</Card.Description>
+    </Card.Content>
+  </Card>,
   document.getElementById("app-root"))
