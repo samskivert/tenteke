@@ -1,10 +1,11 @@
 import * as React from "react";
-// import * as ReactDOM from "react-dom";
+import { observer } from "mobx-react"
+import { AudioStore } from "./store"
 
 const WIDTH = 290
 const HEIGHT = 145
 
-function renderHisto (ctx :CanvasRenderingContext2D, data :Uint8Array) {
+function renderHisto (ctx :CanvasRenderingContext2D, data :Uint8Array, fps :number) {
   const buckets = data.length
   const barWidth = (WIDTH / buckets)-1
   let x = 0, barHeight = 0
@@ -20,9 +21,30 @@ function renderHisto (ctx :CanvasRenderingContext2D, data :Uint8Array) {
     ctx.fillRect(x, HEIGHT - barHeight, barWidth, barHeight)
     x += barWidth + 1
   }
+  ctx.fillText(`${fps}`, WIDTH-15, 10)
 }
 
-export class AudioViz extends React.Component {
+var testNo = 0
+
+@observer
+export class SigList extends React.Component<{store :AudioStore}> {
+
+  render () {
+    const {store} = this.props
+    const sigs = (store.sigs.length == 0) ? <div>No sigs.</div> :
+      <ul>{store.sigs.map(sig => <li key={sig.name}>{sig.name}</li>)}</ul>
+
+    return (
+      <div>
+        {sigs}
+        <button onClick={ev => {
+          testNo += 1 ; store.recordSig(`Test ${testNo}`)}
+        }>Add strike</button>
+      </div>)
+  }
+}
+
+export class AudioViz extends React.Component<{store :AudioStore}> {
 
   canvasRef = React.createRef<HTMLCanvasElement>()
 
@@ -36,21 +58,11 @@ export class AudioViz extends React.Component {
         ctx.fillStyle = "rgb(128, 128, 256)"
         ctx.fillRect(WIDTH/4, HEIGHT/4, WIDTH/2, HEIGHT/2)
 
-        var actx = new AudioContext()
-        navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
-          var source = actx.createMediaStreamSource(stream)
-          var analyser = actx.createAnalyser()
-          analyser.smoothingTimeConstant = 0.1
-          source.connect(analyser)
-          // analyser.connect(actx.destination)
-          analyser.fftSize = 32
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const renderFrame = () => {
-            requestAnimationFrame(renderFrame)
-            analyser.getByteFrequencyData(dataArray)
-            renderHisto(ctx, dataArray)
-          }
-          requestAnimationFrame(renderFrame)
+        var lastFrameTime = 0
+        this.props.store.start((time, frame) => {
+          const frameDelta = time - lastFrameTime
+          lastFrameTime = time
+          renderHisto(ctx, frame, Math.round(1000/frameDelta))
         })
       }
     }
