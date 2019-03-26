@@ -1,10 +1,10 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 // import * as firebase from "firebase/app"
-import { Card, Container } from 'semantic-ui-react'
+import { Container, Grid } from 'semantic-ui-react'
 // import 'semantic-ui-css/semantic.min.css'
 import { AudioStore } from "./store"
-import { SigList, AudioViz } from "./viz"
+import { EventViz, FreqViz, SigList } from "./viz"
 
 // firebase.initializeApp({
 //   apiKey: "AIzaSyDy3Caew0ql16PM0x7laFXTcs6jih_-e8o",
@@ -14,16 +14,23 @@ import { SigList, AudioViz } from "./viz"
 
 
 const store = new AudioStore()
+store.start()
 
 ReactDOM.render(
   <Container>
-    <Card>
-      <AudioViz store={store} />
-      <Card.Content>
-        <Card.Header>Things!</Card.Header>
-        <Card.Description>Herein we will put some things.</Card.Description>
-      </Card.Content>
-    </Card>
-    <SigList store={store} />
+  <h2>Ten Teke</h2>
+  <Grid columns={3}>
+    <Grid.Row>
+      <Grid.Column>
+       <FreqViz store={store} />
+      </Grid.Column>
+      <Grid.Column>
+       <EventViz store={store} />
+      </Grid.Column>
+      <Grid.Column>
+        <SigList store={store} />
+      </Grid.Column>
+    </Grid.Row>
+  </Grid>
   </Container>,
   document.getElementById("app-root"))
