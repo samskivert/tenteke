@@ -1,6 +1,7 @@
 import * as React from "react";
 import { autorun } from "mobx"
 import { observer } from "mobx-react"
+import { Button, Grid, Header, Icon, Select } from 'semantic-ui-react'
 import { AudioStore } from "./store"
 import { Event } from "./detector"
 
@@ -49,10 +50,28 @@ function renderHisto (ctx :CanvasRenderingContext2D, data :Uint8Array, fps :numb
   ctx.fillText(`${fps}`, width-15, 10)
 }
 
+function renderSpectro (ctx :CanvasRenderingContext2D, data :Float32Array) {
+  const {width, height} = ctx.canvas
+  const buckets = data.length
+  const barWidth = (width / (buckets-1))-1
+  ctx.fillStyle = "#000"
+  ctx.fillRect(0, 0, width, height)
+  ctx.strokeStyle = "#FFF"
+  let x = 0, y = -data[0] * height/2 + height/2
+  ctx.beginPath()
+  ctx.moveTo(x, y)
+  for (var ii = 1; ii < buckets; ii++) {
+    x += barWidth + 1
+    y = -data[ii] * height/2 + height/2
+    ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+  ctx.stroke()
+}
+
 export class FreqViz extends React.Component<{store :AudioStore}> {
 
   canvasRef = React.createRef<HTMLCanvasElement>()
-  lastFrameTime = 0
   onUnmount :Thunk = () => {}
 
   componentDidMount () {
@@ -81,6 +100,71 @@ export class FreqViz extends React.Component<{store :AudioStore}> {
         <canvas ref={this.canvasRef} width={WIDTH} height={HEIGHT} />
       </div>
     )
+  }
+}
+
+export class SampleViz extends React.Component<{store :AudioStore}> {
+
+  canvasRef = React.createRef<HTMLCanvasElement>()
+  lastFrameTime = 0
+  onUnmount :Thunk = () => {}
+
+  componentDidMount () {
+    const canvas = this.canvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext("2d")
+      if (ctx) {
+        this.onUnmount = autorun(() => {
+          const {time, samples} = this.props.store
+          this.lastFrameTime = time
+          renderSpectro(ctx, samples)
+        })
+      }
+    }
+  }
+
+  componentWillUnmount () {
+    this.onUnmount()
+  }
+
+  render () {
+    return (
+      <div>
+        <canvas ref={this.canvasRef} width={WIDTH} height={HEIGHT} />
+      </div>
+    )
+  }
+}
+
+const freqOpts = [512, 1024, 2048, 3072, 4096, 6144, 8192, 12288, 16378].map(
+  freq => ({key: `${freq}`, text: `${freq} Hz`, value: `${freq}`}))
+
+@observer
+export class AudioControls extends React.Component<{store :AudioStore}> {
+
+  render () {
+    const {store} = this.props
+    const icon = store.paused ? <Icon name='play' /> : <Icon name='pause' />
+    const text = store.paused ? "Resume" : "Pause"
+    const togglePause = () => { store.paused = !store.paused }
+    return (<div>
+      <Header>Controls</Header>
+      <Grid>
+        <Grid.Row>
+          <Button icon labelPosition="left" onClick={togglePause}>{icon}{text}</Button>
+        </Grid.Row>
+        <Grid.Row>
+          <Select options={freqOpts} value={`${store.filterFreq}`}
+                  onChange={(_, data) => { store.filterFreq = parseInt(`${data.value}`) }} />
+        </Grid.Row>
+        <Grid.Row>
+          <input min="1" max="10" type="range" value={store.filterQ} onChange={ ev => {
+            store.filterQ = parseFloat(ev.target.value)
+          }} />
+          {store.filterQ}
+        </Grid.Row>
+      </Grid>
+    </div>)
   }
 }
 

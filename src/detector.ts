@@ -1,6 +1,6 @@
 
 /** The width of a signature in frequency buckets. */
-const sigWidth = 16
+const sigWidth = 32
 
 /** The size of the FFT used when processing audio. Must be 2 x signature width. */
 const fftSize = sigWidth * 2
@@ -13,13 +13,14 @@ const sigLength = 10
 const maxFreqEnergy = 256
 const minStartEnergy = 0.25 // TODO: tune
 
-const soundStartEnergy = 0.25
-const soundEndEnergy = 0.20
+const soundStartEnergy = 0.15
+const soundEndEnergy = 0.10
 
 const maxError = maxFreqEnergy / 8 // TODO: tune
 const maxErrorSq = (maxError * maxError) * sigLength
 
 const minBeatDelta = 200 // ms
+const minSoundFrames = 2
 
 /** Creates an audio analyser node, prepared appropriately for recording and detecting strikes. */
 export function createAnalyser (ctx :AudioContext) :AnalyserNode {
@@ -31,17 +32,18 @@ export function createAnalyser (ctx :AudioContext) :AnalyserNode {
 
 // we only use the low 1/4th of the spectrum to compute sound "energy"
 const energyFreqs = sigWidth/2
-const totalEnergy = energyFreqs * maxFreqEnergy
 
 /** Returns the total "energy" of the frame (the sum of the energy at each frequency component) as a
   * fraction of the maximum total energy. */
 export function computeEnergy (frame :Uint8Array) :number {
-  let sum = 0
-  for (let ii = 0, ll = energyFreqs; ii < ll; ii += 1) {
+  let sum = 0, freqs = 0
+  const skipFreqs = 2 // skip two lowest frequency bands...?
+  for (let ii = skipFreqs, ll = energyFreqs; ii < ll; ii += 1, freqs += 1) {
+    const freqEnergy = frame[ii]
     // TODO: should this be scaled by the bucket frequency? physics!
-    sum += frame[ii]
+    sum += freqEnergy / maxFreqEnergy
   }
-  return sum / totalEnergy
+  return sum / freqs
 }
 
 /** Computes the mean squared error between `frameA` and `frameB`. */
@@ -101,7 +103,7 @@ export class Framer {
     const {frames, energies, times, size} = this
     const curFrame = this.nextFrame
     this.nextFrame = curFrame + 1
-    const curIdx = curFrame % size
+    const curIdx = curFrame % size, prevIdx = (curFrame-1) % size
     frames[curIdx].set(frame)
     times[curIdx] = time
     const energy = computeEnergy(frame)
@@ -113,8 +115,10 @@ export class Framer {
       // if the energy drops below the end energy threshold (decaying to quietude), or it jumps up
       // to a new high (start of a new strike while previous strike was decaying), pinch off this
       // strike and (potentially) start a new one
+      const prevEnergy = energies[prevIdx]
       const peakEnergy = energies[this.peakFrame % size]
-      if (energy < soundEndEnergy || (curFrame > this.peakFrame+1 && energy > peakEnergy*0.95)) {
+      if (energy < soundEndEnergy ||
+          (energy > 1.25*prevEnergy && (curFrame - startFrame > minSoundFrames))) {
         const length = curFrame - startFrame, startIdx = startFrame % size
         event = {
           startTime: times[startIdx],
