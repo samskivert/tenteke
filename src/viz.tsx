@@ -168,8 +168,8 @@ export class AudioControls extends React.Component<{store :AudioStore}> {
   }
 }
 
-function renderGrid (ctx :CanvasRenderingContext2D, bheight :number) {
-  const {width, height} = ctx.canvas
+function renderGrid (ctx :CanvasRenderingContext2D, rows :number) {
+  const {width, height} = ctx.canvas, bheight = height / rows
   ctx.fillStyle = "#FFFFFF"
   ctx.fillRect(0, 0, width, height)
   ctx.strokeStyle = "rgb(" + 0 + "," + 0 + "," + 0 + ")"
@@ -178,13 +178,12 @@ function renderGrid (ctx :CanvasRenderingContext2D, bheight :number) {
   }
 }
 
+const Rows = 5
 const MillisPerRow = 2000 // TODO: config
 
-function renderEvents (ctx :CanvasRenderingContext2D, bheight :number, time :number,
+function renderEvents (ctx :CanvasRenderingContext2D, rows :number, time :number,
                        events :Event[]) {
-  const {width, height} = ctx.canvas
-  const rows = Math.floor(height/bheight)
-
+  const {width, height} = ctx.canvas, bheight = height/rows
   let rowtime = Math.floor(time/MillisPerRow) * MillisPerRow
   let evidx = events.length-1
   for (let row = rows-1; row >= 0 && evidx >= 0; row -= 1, rowtime -= MillisPerRow) {
@@ -217,11 +216,61 @@ export class EventViz extends React.Component<{store :AudioStore}> {
     if (canvas) {
       const ctx = canvas.getContext("2d")
       if (ctx) {
-        const bheight = ctx.canvas.height/5
         this.onUnmount = autorun(() => {
           const {time, events} = this.props.store
-          renderGrid(ctx, bheight)
-          renderEvents(ctx, bheight, time, events)
+          renderGrid(ctx, Rows)
+          renderEvents(ctx, Rows, time, events)
+        })
+      }
+    }
+  }
+
+  componentWillUnmount () {
+    this.onUnmount()
+  }
+
+  render () {
+    return (
+      <div>
+        <canvas ref={this.canvasRef} width={WIDTH} height={HEIGHT} />
+      </div>
+    )
+  }
+}
+
+const MaxDiff = 100000
+
+function renderSpecDiffs (ctx :CanvasRenderingContext2D, rows :number, time :number,
+                          times :number[], diffs :number[]) {
+  const {width, height} = ctx.canvas, bheight = height/rows
+  let rowtime = Math.floor(time/MillisPerRow) * MillisPerRow
+  ctx.fillStyle = "#00F"
+  for (let row = rows-1; row >= 0; row -= 1, rowtime -= MillisPerRow) {
+    let evy = row*bheight
+    for (let ii = 0; ii < diffs.length; ii += 1) {
+      let time = times[ii], evtime = time - rowtime
+      if (evtime >= 0 && evtime < MillisPerRow) {
+        let diff = diffs[ii], evx = evtime * width / MillisPerRow, evh = diff * bheight / MaxDiff
+        ctx.fillRect(evx, evy+bheight-evh, 1, evh)
+      }
+    }
+  }
+}
+
+export class SpecDiffViz extends React.Component<{store :AudioStore}> {
+
+  canvasRef = React.createRef<HTMLCanvasElement>()
+  onUnmount :Thunk = () => {}
+
+  componentDidMount () {
+    const canvas = this.canvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext("2d")
+      if (ctx) {
+        this.onUnmount = autorun(() => {
+          const {time, times, diffs} = this.props.store
+          renderGrid(ctx, Rows)
+          renderSpecDiffs(ctx, Rows, time, times, diffs)
         })
       }
     }

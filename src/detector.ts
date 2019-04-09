@@ -1,9 +1,9 @@
 
-/** The width of a signature in frequency buckets. */
-const sigWidth = 32
+/** The target number of frequency bands. */
+const bands = 256
 
-/** The size of the FFT used when processing audio. Must be 2 x signature width. */
-const fftSize = sigWidth * 2
+/** The size of the FFT used when processing audio. Must be `2 x bands`. */
+const fftSize = bands * 2
 
 /** The length of a signature, in frames. */
 const sigLength = 10
@@ -16,11 +16,14 @@ const minStartEnergy = 0.25 // TODO: tune
 const soundStartEnergy = 0.15
 const soundEndEnergy = 0.10
 
-const maxError = maxFreqEnergy / 8 // TODO: tune
-const maxErrorSq = (maxError * maxError) * sigLength
+// const maxError = maxFreqEnergy / 8 // TODO: tune
+// const maxErrorSq = (maxError * maxError) * sigLength
 
-const minBeatDelta = 200 // ms
+// const minBeatDelta = 200 // ms
 const minSoundFrames = 2
+
+// we only use the low 1/4th of the spectrum to compute sound "energy"
+const energyFreqs = bands/2
 
 /** Creates an audio analyser node, prepared appropriately for recording and detecting strikes. */
 export function createAnalyser (ctx :AudioContext) :AnalyserNode {
@@ -29,9 +32,6 @@ export function createAnalyser (ctx :AudioContext) :AnalyserNode {
   alz.smoothingTimeConstant = 0 // TODO: tune?
   return alz
 }
-
-// we only use the low 1/4th of the spectrum to compute sound "energy"
-const energyFreqs = sigWidth/2
 
 /** Returns the total "energy" of the frame (the sum of the energy at each frequency component) as a
   * fraction of the maximum total energy. */
@@ -83,6 +83,55 @@ export type Event = {
 
 // type State = "idle" | "started" | "detected" | "overflowed"
 
+// used in computing spectral difference: M frames of history are averaged to compute the
+// "previous" frame
+const M = 3
+
+// TODO: limit relevant bands to 300-5000Hz?
+const MinBand = 0
+const MaxBand = bands
+
+export class OnsetDetector {
+  frames :Float32Array[] = []
+  times :DOMHighResTimeStamp[] = []
+  diffs :number[] = []
+  curDiff :Float32Array = new Float32Array(bands)
+  nextFrame = 0
+
+  constructor (readonly size :number) {
+    for (let ii = 0; ii < size; ii += 1) {
+      this.frames[ii] = new Float32Array(bands)
+      this.diffs[ii] = 0
+    }
+  }
+
+  update (time :DOMHighResTimeStamp, frame :Float32Array) :number {
+    // TODO: modulate frame bins based on equal loudness contour
+
+    const {frames, times, diffs, curDiff, size} = this
+    const curFrame = this.nextFrame
+    this.nextFrame = curFrame + 1
+    const curIdx = curFrame % size
+    frames[curIdx].set(frame)
+    times[curIdx] = time
+
+    let diff = 0
+    for (let bb = MinBand; bb < MaxBand; bb += 1) {
+      // compute the average energy for the previous M frames
+      let prevEnergy = 0
+      for (let mm = 1; mm <= M; mm += 1) {
+        prevEnergy += frames[(curFrame-mm)%size][bb]
+      }
+      // spectral difference is this frame's energy minus averaged energy (clamped to >=0)
+      let bandDiff = Math.max(frame[bb] - prevEnergy, 0)
+      curDiff[bb] = bandDiff
+      diff += bandDiff
+    }
+    // total spectral difference is sum of (clamped) per-band differences
+    return diffs[curFrame] = diff
+  }
+}
+
 export class Framer {
   frames :Uint8Array[] = []
   times :DOMHighResTimeStamp[] = []
@@ -94,7 +143,7 @@ export class Framer {
 
   constructor (readonly size :number) {
     for (let ii = 0; ii < size; ii += 1) {
-      this.frames[ii] = new Uint8Array(sigWidth)
+      this.frames[ii] = new Uint8Array(bands)
       this.energies[ii] = 0
     }
   }
@@ -209,45 +258,45 @@ export type Strike = {
   error :number
 }
 
-export class Detector {
-  lastMatchTime = 0
+// export class Detector {
+//   lastMatchTime = 0
 
-  constructor (readonly frames :Framer) {}
+//   constructor (readonly frames :Framer) {}
 
-  update (time :DOMHighResTimeStamp, sigs :Signature[]) :Strike|void {
-    const frames = this.frames
+//   update (time :DOMHighResTimeStamp, sigs :Signature[]) :Strike|void {
+//     const frames = this.frames
 
-    // if we have nothing to match, stop now
-    if (sigs.length == 0) return undefined
+//     // if we have nothing to match, stop now
+//     if (sigs.length == 0) return undefined
 
-    // delay a bit after each match so that we don't repeat match on strikes with longer decay
-    if (time - this.lastMatchTime < minBeatDelta) return undefined
+//     // delay a bit after each match so that we don't repeat match on strikes with longer decay
+//     if (time - this.lastMatchTime < minBeatDelta) return undefined
 
-    // if the first frame lacks sufficient total energy, no match
-    const {energies, times, nextFrame} = frames
-    if (energies[nextFrame] < minStartEnergy) {
-      // console.log(`First frame energy: ${energies[nextFrame]}`)
-      return undefined
-    }
+//     // if the first frame lacks sufficient total energy, no match
+//     const {energies, times, nextFrame} = frames
+//     if (energies[nextFrame] < minStartEnergy) {
+//       // console.log(`First frame energy: ${energies[nextFrame]}`)
+//       return undefined
+//     }
 
-    // find the best matching signature
-    let minSig = sigs[0]
-    let minError = minSig.error(frames)
-    for (let ii = 1, ll = sigs.length; ii < ll; ii += 1) {
-      let sig = sigs[ii]
-      let sigError = sig.error(frames)
-      if (sigError < minError) {
-        minSig = sig
-        minError = sigError
-      }
-    }
+//     // find the best matching signature
+//     let minSig = sigs[0]
+//     let minError = minSig.error(frames)
+//     for (let ii = 1, ll = sigs.length; ii < ll; ii += 1) {
+//       let sig = sigs[ii]
+//       let sigError = sig.error(frames)
+//       if (sigError < minError) {
+//         minSig = sig
+//         minError = sigError
+//       }
+//     }
 
-    console.log(`Best sig: ${minSig.name} error: ${minError} (${maxErrorSq})`)
+//     console.log(`Best sig: ${minSig.name} error: ${minError} (${maxErrorSq})`)
 
-    // if the best isn't good enough, no matches
-    if (minError > maxErrorSq) return undefined
+//     // if the best isn't good enough, no matches
+//     if (minError > maxErrorSq) return undefined
 
-    this.lastMatchTime = time
-    return {startTime: times[nextFrame], detectTime: time, sig: minSig, error: minError}
-  }
-}
+//     this.lastMatchTime = time
+//     return {startTime: times[nextFrame], detectTime: time, sig: minSig, error: minError}
+//   }
+// }

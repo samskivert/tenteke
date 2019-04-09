@@ -1,9 +1,11 @@
 import { observable, observe } from "mobx"
-import { createAnalyser, Detector, Event, Framer, Signature, SigRecorder } from "./detector"
+import { createAnalyser, OnsetDetector, Event, Framer, Signature, SigRecorder } from "./detector"
 
 type FrameFn = (time :DOMHighResTimeStamp, frame :Uint8Array) => void
 
 const MaxEventAge = 10 * 1000 // 10s
+
+const TrackFrames = 60 * 10 // 10s @ 60 fps
 
 export class AudioStore {
   ctx = new AudioContext()
@@ -19,11 +21,18 @@ export class AudioStore {
   })
 
   frames = new Framer(100) // TODO: how many frames to track?
-  detector = new Detector(this.frames)
+  // detector = new Detector(this.frames)
+  onsettor = new OnsetDetector(10)
 
   readonly frame = new Uint8Array(this.analyser.frequencyBinCount);
+  readonly fframe = new Float32Array(this.analyser.frequencyBinCount);
   readonly samples = new Float32Array(this.analyser.fftSize)
+
   events :Event[] = []
+
+  diffs :number[] = []
+  times :number[] = []
+  curFrame :number = 0
 
   @observable paused = false
 
@@ -64,22 +73,34 @@ export class AudioStore {
   }
 
   readonly renderFrame = (time :DOMHighResTimeStamp) => {
-    const {analyser, frame, samples} = this
     if (!this.paused) requestAnimationFrame(this.renderFrame)
+    const {analyser, frame, fframe, samples, curFrame} = this
+    this.curFrame = curFrame + 1
+
+    // TODO: compute appropriate sampling interval based on FFT params and set non-vsynced timer to
+    // do audio frame calculations; then update viz in anim frame callback
+    analyser.getFloatFrequencyData(fframe)
     analyser.getByteFrequencyData(frame)
     analyser.getFloatTimeDomainData(samples)
+
     const event = this.frames.update(time, frame)
     event && this.addEvent(time, event)
-    this.time = time
+
+    const curIdx = curFrame % TrackFrames
+    this.times[curIdx] = time
+    this.diffs[curIdx] = this.onsettor.update(time, fframe)
 
     const modeFn = this.modeFn
     if (modeFn) modeFn(time, frame)
     else {
-      const event = this.detector.update(time, this.sigs)
-      if (event) {
-        console.log(`Event: ${event.sig.name} // ${event.error}`)
-      }
+      // const event = this.detector.update(time, this.sigs)
+      // if (event) {
+      //   console.log(`Event: ${event.sig.name} // ${event.error}`)
+      // }
     }
+
+    // finally update current time to trigger observers
+    this.time = time
   }
 
   addEvent (time :DOMHighResTimeStamp, event :Event) {
